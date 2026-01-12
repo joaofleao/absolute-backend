@@ -1,0 +1,38 @@
+{
+  "name": "absolute-backend",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/joaofleao/absolute-backend#readme",
+  "bugs": {
+    "url": "https://github.com/joaofleao/absolute-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joaofleao/absolute-backend.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": ".prettierrc.js",
+  "scripts": {
+    "start": "npx convex dev",
+    "deploy": "npx convex deploy",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings 0"
+  },
+  "dependencies": {
+    "@convex-dev/auth": "^0.0.90",
+    "convex": "^1.31.3",
+    "google-auth-library": "^10.5.0",
+    "verify-apple-id-token": "^3.1.2"
+  },
+  "devDependencies": {
+    "eslint": "^9.33.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "@typescript-eslint/eslint-plugin": "^8.52.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "prettier": "^3.6.2",
+    "typescript": "~5.8.3"
+  }
+}
