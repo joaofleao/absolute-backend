@@ -18,7 +18,11 @@
     "start": "npx convex dev",
     "deploy": "npx convex deploy",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "lint": "eslint . --ext .ts,.tsx --max-warnings 0"
+    "lint": "eslint . --ext .ts,.tsx --max-warnings 0",
+    "import": "npx convex export --prod --path ./export.zip",
+    "export": "npx convex import ./export.zip --replace",
+    "delete": "rm -f ./export.zip",
+    "update": "npm run delete; npm run import; npm run export"
   },
   "dependencies": {
     "@convex-dev/auth": "^0.0.90",

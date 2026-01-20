@@ -7,7 +7,9 @@ import { countries } from './constants'
 import { getAuthUserId } from '@convex-dev/auth/server'
 
 export const getOscarEditions = query({
-  args: {},
+  args: {
+    public: v.optional(v.boolean()),
+  },
   returns: v.array(
     v.object({
       _id: v.id('oscarEditions'),
@@ -16,12 +18,65 @@ export const getOscarEditions = query({
       year: v.number(),
       date: v.number(),
       announcement: v.optional(v.number()),
-      complete: v.boolean(),
+      finished: v.boolean(), // all winners have been logged
+      complete: v.boolean(), // all nominations have been logged
+      public: v.boolean(), // should be displayed to public
+      allowVoting: v.boolean(),
+      hasVoted: v.boolean(),
     }),
   ),
-  handler: async (ctx) => {
-    const allEditions = await ctx.db.query('oscarEditions').order('desc').collect()
-    return allEditions
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx)
+
+    const allEditions = await ctx.db
+      .query('oscarEditions')
+      .withIndex(
+        'by_public_and_number',
+        args.public !== undefined ? (q) => q.eq('public', args.public ?? true) : undefined,
+      )
+      .order('desc')
+      .collect()
+
+    if (!userId) {
+      return allEditions.map((edition) => ({
+        ...edition,
+        allowVoting: false,
+        hasVoted: false,
+      }))
+    }
+
+    // Get all nominations grouped by edition
+    const nominations = await ctx.db.query('oscarNomination').collect()
+    const nominationsByEdition = new Map<Id<'oscarEditions'>, typeof nominations>()
+    for (const nom of nominations) {
+      const existing = nominationsByEdition.get(nom.editionId) ?? []
+      nominationsByEdition.set(nom.editionId, [...existing, nom])
+    }
+
+    // Get user's votes
+    const userVotes = await ctx.db
+      .query('oscarRanks')
+      .withIndex('by_user', (q) => q.eq('userId', userId))
+      .collect()
+    const votedNominationIds = new Set(userVotes.map((v) => v.nominationId))
+
+    return allEditions.map((edition) => {
+      const allowVoting =
+        edition.announcement !== undefined &&
+        Date.now() >= edition.announcement &&
+        edition.complete === true &&
+        edition.date > Date.now()
+
+      // Check if user has voted for any nomination in this edition
+      const editionNominations = nominationsByEdition.get(edition._id) ?? []
+      const hasVoted = editionNominations.some((nom) => votedNominationIds.has(nom._id))
+
+      return {
+        ...edition,
+        allowVoting,
+        hasVoted,
+      }
+    })
   },
 })
 
@@ -32,6 +87,8 @@ export const createOscarEdition = mutation({
     date: v.number(),
     announcement: v.optional(v.number()),
     complete: v.boolean(),
+    public: v.boolean(),
+    finished: v.boolean(),
   },
   returns: v.id('oscarEditions'),
   handler: async (ctx, args) => {
@@ -48,7 +105,10 @@ export const updateOscarEdition = mutation({
     number: v.number(),
     year: v.number(),
     date: v.number(),
+    announcement: v.optional(v.number()),
     complete: v.boolean(),
+    public: v.boolean(),
+    finished: v.boolean(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -81,6 +141,8 @@ export const getOscarCategories = query({
     v.object({
       _id: v.id('oscarCategories'),
       _creationTime: v.number(),
+
+      group: v.string(),
       name: v.object({
         pt_BR: v.string(),
         en_US: v.string(),
@@ -89,12 +151,73 @@ export const getOscarCategories = query({
     }),
   ),
   handler: async (ctx) => {
-    return await ctx.db.query('oscarCategories').order('asc').collect()
+    const allCategories = await ctx.db.query('oscarCategories').order('asc').collect()
+
+    return await Promise.all(
+      allCategories
+        .sort((a, b) => a.order - b.order)
+        .map(async (category) => {
+          const groupData = await ctx.db.get(category.groupId)
+          if (!groupData) throw new ConvexError('Group not found')
+          return {
+            _id: category._id,
+            _creationTime: category._creationTime,
+            group: groupData.name.en_US,
+            name: category.name,
+            order: category.order,
+          }
+        }),
+    )
+  },
+})
+
+export const getOscarGroups = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id('oscarGroups'),
+      _creationTime: v.number(),
+      name: v.object({
+        pt_BR: v.string(),
+        en_US: v.string(),
+      }),
+      tagline: v.object({
+        pt_BR: v.string(),
+        en_US: v.string(),
+      }),
+      order: v.number(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const allGroups = await ctx.db.query('oscarGroups').order('asc').collect()
+    return allGroups
+  },
+})
+
+export const createOscarGroup = mutation({
+  args: {
+    name: v.object({
+      pt_BR: v.string(),
+      en_US: v.string(),
+    }),
+    tagline: v.object({
+      pt_BR: v.string(),
+      en_US: v.string(),
+    }),
+    order: v.number(),
+  },
+  returns: v.id('oscarGroups'),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx)
+    if (!userId) throw new ConvexError('Not authenticated')
+
+    return await ctx.db.insert('oscarGroups', args)
   },
 })
 
 export const createOscarCategory = mutation({
   args: {
+    groupId: v.id('oscarGroups'),
     name: v.object({
       pt_BR: v.string(),
       en_US: v.string(),
@@ -118,6 +241,7 @@ export const updateOscarCategory = mutation({
       en_US: v.string(),
     }),
     order: v.number(),
+    groupId: v.id('oscarGroups'),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -134,6 +258,32 @@ export const updateOscarCategory = mutation({
   },
 })
 
+export const updateOscarGroup = mutation({
+  args: {
+    _id: v.id('oscarGroups'),
+    name: v.object({
+      pt_BR: v.string(),
+      en_US: v.string(),
+    }),
+    tagline: v.object({
+      pt_BR: v.string(),
+      en_US: v.string(),
+    }),
+    order: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx)
+    if (!userId) throw new ConvexError('Not authenticated')
+    const { _id, ...updates } = args
+
+    const cleanUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([_, value]) => value !== undefined),
+    )
+    await ctx.db.patch(_id, cleanUpdates)
+  },
+})
+
 export const deleteOscarCategory = mutation({
   args: { _id: v.id('oscarCategories') },
   returns: v.null(),
@@ -141,6 +291,16 @@ export const deleteOscarCategory = mutation({
     const userId = await getAuthUserId(ctx)
     if (!userId) throw new ConvexError('Not authenticated')
 
+    await ctx.db.delete(args._id)
+  },
+})
+
+export const deleteOscarGroup = mutation({
+  args: { _id: v.id('oscarGroups') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx)
+    if (!userId) throw new ConvexError('Not authenticated')
     await ctx.db.delete(args._id)
   },
 })
@@ -335,7 +495,7 @@ export const getWatchedMoviesFromEdition = query({
     v.object({
       _id: v.id('watchedMovies'),
       title: v.string(),
-      posterPath: v.string(),
+      posterPath: v.optional(v.string()),
       watchedAt: v.number(),
       tmdbId: v.number(),
       movieId: v.id('movies'),
@@ -368,7 +528,7 @@ export const getWatchedMoviesFromEdition = query({
         return {
           _id: item._id,
           title: movie!.title[args.language ?? 'en_US'],
-          posterPath: movie!.posterPath[args.language ?? 'en_US'],
+          posterPath: movie!.posterPath ? movie!.posterPath[args.language ?? 'en_US'] : undefined,
           tmdbId: movie!.tmdbId,
           watchedAt: item.watchedAt,
           movieId: movie!._id,
@@ -390,7 +550,7 @@ export const getMovies = query({
       _id: v.id('movies'),
       tmdbId: v.number(),
       title: v.string(),
-      posterPath: v.string(),
+      posterPath: v.optional(v.string()),
       watched: v.optional(v.boolean()),
       nominationCount: v.number(),
       friends_who_watched: v.array(
@@ -423,7 +583,7 @@ export const getMovies = query({
       _id: Id<'movies'>
       tmdbId: number
       title: string
-      posterPath: string
+      posterPath: string | undefined
       watched: boolean | undefined
       nominationCount: number
       friends_who_watched: { _id: Id<'users'>; name?: string; image?: string }[]
@@ -479,7 +639,7 @@ export const getMovies = query({
         _id: movie._id,
         tmdbId: movie.tmdbId,
         title: movie.title[args.language ?? 'en_US'],
-        posterPath: movie.posterPath[args.language ?? 'en_US'],
+        posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
         watched,
         nominationCount: count,
         friends_who_watched: friendsWhoWatchedByMovie.get(movieId) ?? [],
@@ -515,7 +675,7 @@ export const getNominations = query({
           movieId: v.id('movies'),
           tmdbId: v.number(),
           title: v.string(),
-          posterPath: v.string(),
+          posterPath: v.optional(v.string()),
           description: v.optional(v.string()),
           winner: v.optional(v.boolean()),
           watched: v.optional(v.boolean()),
@@ -526,15 +686,19 @@ export const getNominations = query({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx)
     const latestEdition = await ctx.db.query('oscarEditions').order('desc').first()
+    const editionId = args.editionId ?? latestEdition?._id
+
+    if (!editionId) return []
+
+    const edition = await ctx.db.get(editionId)
+    if (!edition || !edition.complete) return []
 
     const nominations = await ctx.db
       .query('oscarNomination')
       .withIndex('by_edition_and_category', (q) =>
         args.categoryId
-          ? q
-              .eq('editionId', args.editionId ?? latestEdition?._id!)
-              .eq('categoryId', args.categoryId)
-          : q.eq('editionId', args.editionId ?? latestEdition?._id!),
+          ? q.eq('editionId', editionId).eq('categoryId', args.categoryId)
+          : q.eq('editionId', editionId),
       )
       .collect()
 
@@ -552,7 +716,7 @@ export const getNominations = query({
           movieId: Id<'movies'>
           tmdbId: number
           title: string
-          posterPath: string
+          posterPath: string | undefined
           description?: string
           winner?: boolean
           watched?: boolean
@@ -616,7 +780,9 @@ export const getNominations = query({
       const posterPath =
         isActorCategory && actor?.picture_path
           ? actor.picture_path
-          : movie!.posterPath[args.language ?? 'en_US']
+          : movie!.posterPath
+            ? movie!.posterPath[args.language ?? 'en_US']
+            : undefined
 
       categoryMap.set(nomination.categoryId, {
         category: oldValue!.category,
@@ -731,7 +897,7 @@ export const getNominationsByCategory = query({
       categoryId: v.id('oscarCategories'),
       name: v.string(),
     }),
-    watched: v.array(
+    nominations: v.array(
       v.object({
         nominationId: v.id('oscarNomination'),
         title: v.string(),
@@ -740,19 +906,6 @@ export const getNominationsByCategory = query({
         extra: v.optional(v.string()),
         image: v.optional(v.string()),
         rank: v.optional(v.number()),
-        winner: v.boolean(),
-        watched: v.boolean(),
-        wish: v.boolean(),
-      }),
-    ),
-    unwatched: v.array(
-      v.object({
-        nominationId: v.id('oscarNomination'),
-        title: v.string(),
-        tmdbId: v.number(),
-        description: v.optional(v.string()),
-        extra: v.optional(v.string()),
-        image: v.optional(v.string()),
         winner: v.boolean(),
         watched: v.boolean(),
         wish: v.boolean(),
@@ -817,7 +970,11 @@ export const getNominationsByCategory = query({
 
           const title = actor ? actor.name : song ? song : movie.title[language]
           const extra = actor || song ? movie.title[language] : undefined
-          const image = actor?.picture_path ? actor.picture_path : movie.posterPath[language]
+          const image = actor?.picture_path
+            ? actor.picture_path
+            : movie.posterPath
+              ? movie.posterPath[language]
+              : undefined
 
           const description =
             actor && character
@@ -844,16 +1001,12 @@ export const getNominationsByCategory = query({
       ),
     )
 
-    const watched = enrichedNominations.filter((n) => n.watched)
-    const unwatched = enrichedNominations.filter((n) => !n.watched)
-
     return {
       category: {
         categoryId: category!._id,
         name: category!.name[language],
       },
-      watched,
-      unwatched,
+      nominations: enrichedNominations,
     }
   },
 })
@@ -984,7 +1137,7 @@ export const getMovieDetail = query({
       pt_BR: v.string(),
       en_US: v.string(),
     }),
-    posterPath: v.string(),
+    posterPath: v.optional(v.string()),
     backdropPath: v.optional(v.string()),
     imdbId: v.optional(v.string()),
     originalLanguage: v.optional(v.string()),
@@ -1236,5 +1389,229 @@ export const getMovieDetail = query({
     //   console.error('Error fetching providers from TMDB:', error)
     //   // Continue without providers if fetch fails
     // }
+  },
+})
+export const getBallotResults = query({
+  args: {
+    editionId: v.optional(v.id('oscarEditions')),
+    language: v.optional(v.union(v.literal('pt_BR'), v.literal('en_US'))),
+  },
+  returns: v.array(
+    v.object({
+      group: v.object({
+        groupId: v.id('oscarGroups'),
+        name: v.string(),
+        tagline: v.string(),
+      }),
+      categories: v.array(
+        v.object({
+          categoryId: v.id('oscarCategories'),
+          name: v.string(),
+
+          points: v.number(),
+          bonus: v.number(),
+          penalty: v.number(),
+
+          nominations: v.array(
+            v.object({
+              nominationId: v.id('oscarNomination'),
+              movieId: v.id('movies'),
+              tmdbId: v.number(),
+              title: v.string(),
+              posterPath: v.optional(v.string()),
+              winner: v.boolean(),
+              watched: v.boolean(),
+            }),
+          ),
+        }),
+      ),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx)
+    if (!userId) return []
+
+    const language = args.language ?? 'en_US'
+    const latestEdition = await ctx.db.query('oscarEditions').order('desc').first()
+    const editionId = args.editionId ?? latestEdition?._id
+    if (!editionId) return []
+
+    // Get all categories with their groups
+    const allCategories = await ctx.db.query('oscarCategories').order('asc').collect()
+
+    // Get all nominations for the edition
+    const nominations = await ctx.db
+      .query('oscarNomination')
+      .withIndex('by_edition', (q) => q.eq('editionId', editionId))
+      .collect()
+
+    // Get user's ranks
+    const userRanks = await ctx.db
+      .query('oscarRanks')
+      .withIndex('by_user', (q) => q.eq('userId', userId))
+      .collect()
+
+    // Get user's watched movies
+    const userWatchedMovies = await ctx.db
+      .query('watchedMovies')
+      .withIndex('by_user', (q) => q.eq('userId', userId))
+      .collect()
+    const watchedMovieIds = new Set(userWatchedMovies.map((w) => w.movieId))
+
+    // Group nominations by category
+    const nominationsByCategory = new Map<Id<'oscarCategories'>, typeof nominations>()
+    for (const nom of nominations) {
+      const existing = nominationsByCategory.get(nom.categoryId) ?? []
+      nominationsByCategory.set(nom.categoryId, [...existing, nom])
+    }
+
+    // Only keep categories that actually have nominations in this edition
+    const categoriesWithNominations = allCategories.filter(
+      (cat) => (nominationsByCategory.get(cat._id)?.length ?? 0) > 0,
+    )
+
+    // Find Best Picture category (among those with nominations)
+    const bestPictureCategory = categoriesWithNominations.find((cat) =>
+      cat.name.en_US.toLowerCase().includes('best picture'),
+    )
+
+    // Group categories by group
+    const categoryMap = new Map<
+      Id<'oscarGroups'>,
+      {
+        categories: {
+          categoryId: Id<'oscarCategories'>
+          name: string
+          points: number
+          bonus: number
+          penalty: number
+          nominations: {
+            nominationId: Id<'oscarNomination'>
+            movieId: Id<'movies'>
+            tmdbId: number
+            title: string
+            posterPath: string | undefined
+            winner: boolean
+            watched: boolean
+          }[]
+        }[]
+      }
+    >()
+
+    // Process each category
+    for (const category of categoriesWithNominations) {
+      const groupId = category.groupId
+
+      if (!categoryMap.has(groupId)) {
+        categoryMap.set(groupId, {
+          categories: [],
+        })
+      }
+
+      const categoryNominations = nominationsByCategory.get(category._id) ?? []
+
+      // Find the winner in this category
+      const winner = categoryNominations.find((nom) => nom.winner)
+
+      let points = 0
+      let bonus = 0
+      let penalty = 0
+
+      if (winner) {
+        // Find user's rank for the winner
+        const userRankForWinner = userRanks.find((r) => r.nominationId === winner._id)
+
+        if (userRankForWinner) {
+          // Calculate base points: rank 1=5pts, 2=4pts, 3=3pts, 4=2pts, 5+=1pt
+          const rank = userRankForWinner.ranking
+          if (rank === 1) points = 5
+          else if (rank === 2) points = 4
+          else if (rank === 3) points = 3
+          else if (rank === 4) points = 2
+          else if (rank >= 5) points = 1
+
+          // Check if movie was watched
+          const watched = watchedMovieIds.has(winner.movieId)
+
+          // Calculate bonus: 5 points for Best Picture winner at rank 1 (only if watched)
+          if (watched && rank === 1 && category._id === bestPictureCategory?._id) {
+            bonus = 5
+          }
+
+          // Calculate penalty: -2 points if not watched
+          if (!watched) {
+            penalty = 2
+          }
+
+          // Apply penalty and ensure minimum of 1 point
+          const finalPoints = points + bonus - penalty
+          points = finalPoints <= 0 ? 1 : finalPoints
+          // Reset bonus and penalty to show net result in points
+          bonus = 0
+          penalty = 0
+        }
+      }
+
+      // Only get nominations that the user has ranked
+      const rankedNominations = categoryNominations.filter((nom) =>
+        userRanks.some((r) => r.nominationId === nom._id),
+      )
+
+      // Fetch movie details for ranked nominations and sort by user's ranking
+      const enrichedNominations = await Promise.all(
+        rankedNominations.map(async (nom) => {
+          const userRank = userRanks.find((r) => r.nominationId === nom._id)
+          const movie = await ctx.db.get(nom.movieId)
+          return {
+            nominationId: nom._id,
+            movieId: nom.movieId,
+            tmdbId: movie?.tmdbId ?? 0,
+            title: movie?.title[language] ?? '',
+            posterPath: movie?.posterPath ? movie.posterPath[language] : undefined,
+            winner: nom.winner ?? false,
+            watched: watchedMovieIds.has(nom.movieId),
+            ranking: userRank?.ranking ?? 999, // For sorting
+          }
+        }),
+      )
+
+      // Sort by user's ranking
+      enrichedNominations.sort((a, b) => a.ranking - b.ranking)
+
+      // Remove ranking from final output
+      const sortedNominations = enrichedNominations.map(({ ranking, ...rest }) => rest)
+
+      const categoryEntry = categoryMap.get(groupId)!
+      categoryEntry.categories.push({
+        categoryId: category._id,
+        name: category.name[language],
+        points,
+        bonus,
+        penalty,
+        nominations: sortedNominations,
+      })
+    }
+
+    // Fetch group data and build final result
+    const result = []
+    for (const [groupId, data] of categoryMap) {
+      const group = await ctx.db.get(groupId)
+      if (!group) continue
+
+      result.push({
+        group: {
+          groupId: group._id,
+          name: group.name[language],
+          tagline: group.tagline[language],
+        },
+        categories: data.categories.sort((a, b) => {
+          const catA = allCategories.find((c) => c._id === a.categoryId)
+          const catB = allCategories.find((c) => c._id === b.categoryId)
+          return (catA?.order ?? 0) - (catB?.order ?? 0)
+        }),
+      })
+    }
+
+    return result
   },
 })

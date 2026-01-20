@@ -98,10 +98,12 @@ export const fetchMovie = internalAction({
       pt_BR: v.string(),
       en_US: v.string(),
     }),
-    posterPath: v.object({
-      pt_BR: v.string(),
-      en_US: v.string(),
-    }),
+    posterPath: v.optional(
+      v.object({
+        pt_BR: v.string(),
+        en_US: v.string(),
+      }),
+    ),
     backdropPath: v.optional(v.string()),
     imdbId: v.optional(v.string()),
     originalLanguage: v.optional(v.string()),
@@ -143,10 +145,12 @@ export const fetchMovie = internalAction({
 
         pt_BR: dataPT.title ?? dataEN.title,
       },
-      posterPath: {
-        en_US: dataEN.poster_path,
-        pt_BR: dataPT.poster_path ?? dataEN.poster_path,
-      },
+      posterPath: dataEN.poster_path
+        ? {
+            en_US: dataEN.poster_path,
+            pt_BR: dataPT.poster_path ?? dataEN.poster_path,
+          }
+        : undefined,
       backdropPath: dataEN.backdrop_path ?? undefined,
       imdbId: dataEN.imdb_id ?? undefined,
       originalLanguage: dataEN.original_language,
@@ -173,10 +177,12 @@ export const insertMovie = internalMutation({
       pt_BR: v.string(),
       en_US: v.string(),
     }),
-    posterPath: v.object({
-      pt_BR: v.string(),
-      en_US: v.string(),
-    }),
+    posterPath: v.optional(
+      v.object({
+        pt_BR: v.string(),
+        en_US: v.string(),
+      }),
+    ),
     backdropPath: v.optional(v.string()),
     imdbId: v.optional(v.string()),
     originalLanguage: v.optional(v.string()),
@@ -214,7 +220,7 @@ export const getMovie = query({
         pt_BR: v.string(),
         en_US: v.string(),
       }),
-      posterPath: v.string(),
+      posterPath: v.optional(v.string()),
       backdropPath: v.optional(v.string()),
       imdbId: v.optional(v.string()),
       originalLanguage: v.optional(v.string()),
@@ -247,7 +253,9 @@ export const getMovie = query({
     if (existingMovie)
       return {
         ...existingMovie,
-        posterPath: existingMovie.posterPath[args.language ?? 'en_US'],
+        posterPath: existingMovie.posterPath
+          ? existingMovie.posterPath[args.language ?? 'en_US']
+          : undefined,
         plot: existingMovie.plot ? existingMovie.plot[args.language ?? 'en_US'] : undefined,
         originalLanguage: existingMovie.originalLanguage
           ? languages[existingMovie.originalLanguage]?.[args.language ?? 'en_US']
@@ -384,7 +392,7 @@ export const getUserWatchlist = query({
       _id: v.id('movies'),
       _creationTime: v.number(),
       title: v.string(),
-      posterPath: v.string(),
+      posterPath: v.optional(v.string()),
       backdropPath: v.optional(v.string()),
       imdbId: v.optional(v.string()),
       originalLanguage: v.optional(v.string()),
@@ -416,7 +424,7 @@ export const getUserWatchlist = query({
           ...movie,
           addedAt: item.addedAt,
           title: movie.title[args.language ?? 'en_US'],
-          posterPath: movie.posterPath[args.language ?? 'en_US'],
+          posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
           plot: movie.plot?.[args.language ?? 'en_US'],
           originalLanguage: movie.originalLanguage
             ? languages[movie.originalLanguage][args.language ?? 'en_US']
@@ -438,7 +446,7 @@ export const getUserWatchedMovies = query({
       _id: v.id('movies'),
       _creationTime: v.number(),
       title: v.string(),
-      posterPath: v.string(),
+      posterPath: v.optional(v.string()),
       backdropPath: v.optional(v.string()),
       imdbId: v.optional(v.string()),
       originalLanguage: v.optional(v.string()),
@@ -473,7 +481,7 @@ export const getUserWatchedMovies = query({
           watchedAt: item.watchedAt,
           watchId: item._id,
           title: movie.title[args.language ?? 'en_US'],
-          posterPath: movie.posterPath[args.language ?? 'en_US'],
+          posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
           plot: movie.plot?.[args.language ?? 'en_US'],
           originalLanguage: movie.originalLanguage
             ? languages[movie.originalLanguage][args.language ?? 'en_US']

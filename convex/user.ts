@@ -47,6 +47,7 @@ export const updateUser = mutation({
 
     if (args.image === null) {
       patch.image = undefined
+      patch.imageURL = undefined
       const user = await ctx.db
         .query('users')
         .filter((q) => q.eq(q.field('_id'), userId))
@@ -54,9 +55,15 @@ export const updateUser = mutation({
       if (user?.image) await ctx.storage.delete(user.image)
     }
     if (args.image !== null && args.image !== undefined) {
+      const user = await ctx.db
+        .query('users')
+        .filter((q) => q.eq(q.field('_id'), userId))
+        .first()
+      if (user?.image) await ctx.storage.delete(user.image)
       const imageUrl = await ctx.storage.getUrl(args.image)
       if (!imageUrl) throw new ConvexError('Failed to get image URL')
-      patch.image = imageUrl
+      patch.image = args.image
+      patch.imageURL = imageUrl
     }
 
     if (args.name !== undefined) patch.name = args.name
@@ -84,6 +91,7 @@ export const getCurrentUser = query({
       email: v.optional(v.string()),
       phone: v.optional(v.string()),
       image: v.optional(v.id('_storage')),
+      imageURL: v.optional(v.string()),
       emailVerificationTime: v.optional(v.number()),
       phoneVerificationTime: v.optional(v.number()),
       isAnonymous: v.optional(v.boolean()),
@@ -227,7 +235,7 @@ export const searchByName = query({
     v.object({
       _id: v.id('users'),
       name: v.optional(v.string()),
-      image: v.optional(v.id('_storage')),
+      imageURL: v.optional(v.string()),
       username: v.optional(v.string()),
       following: v.boolean(),
       follows: v.boolean(),
@@ -259,7 +267,7 @@ export const searchByName = query({
             return {
               _id: user._id,
               name: user.name,
-              image: user.image,
+              imageURL: user.imageURL,
               username: user.username,
               following: !!following,
               follows: !!follows,
@@ -269,7 +277,7 @@ export const searchByName = query({
       : users.map((user) => ({
           _id: user._id,
           name: user.name,
-          image: user.image,
+          imageURL: user.imageURL,
           username: user.username,
           following: false,
           follows: false,
@@ -308,7 +316,7 @@ export const getFollowing = query({
       _id: v.id('users'),
       name: v.optional(v.string()),
       username: v.optional(v.string()),
-      image: v.optional(v.id('_storage')),
+      imageURL: v.optional(v.string()),
     }),
   ),
   handler: async (ctx) => {
@@ -327,7 +335,7 @@ export const getFollowing = query({
           _id: friend!._id,
           name: friend!.name,
           username: friend!.username,
-          image: friend!.image,
+          imageURL: friend!.imageURL,
         }
       }),
     )
@@ -342,7 +350,7 @@ export const getFollowers = query({
     v.object({
       _id: v.id('users'),
       name: v.optional(v.string()),
-      image: v.optional(v.id('_storage')),
+      imageURL: v.optional(v.string()),
       username: v.optional(v.string()),
     }),
   ),
@@ -362,7 +370,7 @@ export const getFollowers = query({
           _id: friend!._id,
           name: friend!.name,
           username: friend!.username,
-          image: friend!.image,
+          imageURL: friend!.imageURL,
         }
       }),
     )

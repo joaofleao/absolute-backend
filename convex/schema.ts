@@ -17,6 +17,7 @@ const applicationTables = {
     name: v.optional(v.string()),
     installedVersion: v.optional(v.string()),
     image: v.optional(v.id('_storage')),
+    imageURL: v.optional(v.string()),
     email: v.optional(v.string()),
     emailVerificationTime: v.optional(v.number()),
     phone: v.optional(v.string()),
@@ -41,10 +42,12 @@ const applicationTables = {
       pt_BR: v.string(),
       en_US: v.string(),
     }),
-    posterPath: v.object({
-      pt_BR: v.string(),
-      en_US: v.string(),
-    }),
+    posterPath: v.optional(
+      v.object({
+        pt_BR: v.string(),
+        en_US: v.string(),
+      }),
+    ),
 
     plot: v.optional(
       v.object({
@@ -94,12 +97,28 @@ const applicationTables = {
   oscarEditions: defineTable({
     number: v.number(),
     year: v.number(),
-    date: v.number(),
     announcement: v.optional(v.number()),
+    date: v.number(),
+    finished: v.boolean(),
+    public: v.boolean(),
     complete: v.boolean(),
-  }).index('by_number', ['number']),
+  }).index('by_public_and_number', ['public', 'number']),
+
+  oscarGroups: defineTable({
+    name: v.object({
+      pt_BR: v.string(),
+      en_US: v.string(),
+    }),
+    tagline: v.object({
+      pt_BR: v.string(),
+      en_US: v.string(),
+    }),
+
+    order: v.number(),
+  }),
 
   oscarCategories: defineTable({
+    groupId: v.id('oscarGroups'),
     name: v.object({
       pt_BR: v.string(),
       en_US: v.string(),

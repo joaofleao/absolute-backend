@@ -36,7 +36,7 @@ export const searchActors = action({
       .map((person) => ({
         id: person.id,
         name: person.name,
-        profile_path: person.profile_path,
+        profile_path: person.profile_path ?? undefined,
         known_for: person.known_for?.map((item: any) => item.title || item.name).join(', ') || '',
       }))
   },
