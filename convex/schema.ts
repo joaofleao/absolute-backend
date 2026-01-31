@@ -6,12 +6,13 @@ import { authTables } from '@convex-dev/auth/server'
 const applicationTables = {
   versions: defineTable({
     version: v.string(),
+    app: v.optional(v.union(v.literal('absolute-cinema'), v.literal('oscar-tracker'))),
     url: v.string(),
     changelog: v.object({
       en_US: v.string(),
       pt_BR: v.string(),
     }),
-  }).index('version', ['version']),
+  }).index('app_and_version', ['app', 'version']),
 
   users: defineTable({
     name: v.optional(v.string()),

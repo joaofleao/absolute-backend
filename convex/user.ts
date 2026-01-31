@@ -12,6 +12,7 @@ export const generateUploadUrl = mutation({
 
 export const getLatestVersion = query({
   args: {
+    app: v.union(v.literal('absolute-cinema'), v.literal('oscar-tracker')),
     language: v.optional(v.union(v.literal('en_US'), v.literal('pt_BR'))),
   },
   returns: v.object({
@@ -20,11 +21,33 @@ export const getLatestVersion = query({
     url: v.string(),
     version: v.string(),
     changelog: v.string(),
+    app: v.optional(v.union(v.literal('absolute-cinema'), v.literal('oscar-tracker'))),
   }),
   handler: async (ctx, args) => {
-    const latest = await ctx.db.query('versions').order('desc').first()
+    const latest = await ctx.db
+      .query('versions')
+      .withIndex('app_and_version', (q) => q.eq('app', args.app))
+      .order('desc')
+      .first()
     if (!latest) throw new ConvexError('No versions found')
     return { ...latest!, changelog: latest.changelog[args.language ?? 'en_US'] }
+  },
+})
+export const checkUsernameAvailability = query({
+  args: {
+    username: v.optional(v.string()),
+  },
+  returns: v.union(v.boolean(), v.null()),
+  handler: async (ctx, args) => {
+    if (args.username === undefined) return null
+    if (args.username.trim().length < 3) return false
+
+    const existingUser = await ctx.db
+      .query('users')
+      .filter((q) => q.eq(q.field('username'), args.username))
+      .first()
+
+    return !existingUser
   },
 })
 
@@ -309,6 +332,24 @@ export const startFollowing = mutation({
   },
 })
 
+export const stopFollowing = mutation({
+  args: { friendId: v.id('users') },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx)
+    if (!userId) throw new ConvexError('Not authenticated')
+
+    const existing = await ctx.db
+      .query('friends')
+      .withIndex('by_user_and_friend', (q) => q.eq('userId', userId).eq('friendId', args.friendId))
+      .first()
+
+    if (!existing) throw new ConvexError('Not following this user')
+
+    await ctx.db.delete(existing._id)
+  },
+})
+
 export const getFollowing = query({
   args: {},
   returns: v.array(
@@ -317,6 +358,7 @@ export const getFollowing = query({
       name: v.optional(v.string()),
       username: v.optional(v.string()),
       imageURL: v.optional(v.string()),
+      followsYou: v.boolean(),
     }),
   ),
   handler: async (ctx) => {
@@ -331,11 +373,16 @@ export const getFollowing = query({
     const users = await Promise.all(
       following.map(async (f) => {
         const friend = await ctx.db.get(f.friendId)
+        const followsYouRelation = await ctx.db
+          .query('friends')
+          .withIndex('by_user_and_friend', (q) => q.eq('userId', f.friendId).eq('friendId', userId))
+          .first()
         return {
           _id: friend!._id,
           name: friend!.name,
           username: friend!.username,
           imageURL: friend!.imageURL,
+          followsYou: !!followsYouRelation,
         }
       }),
     )
@@ -352,6 +399,7 @@ export const getFollowers = query({
       name: v.optional(v.string()),
       imageURL: v.optional(v.string()),
       username: v.optional(v.string()),
+      following: v.boolean(),
     }),
   ),
   handler: async (ctx) => {
@@ -366,11 +414,16 @@ export const getFollowers = query({
     const users = await Promise.all(
       following.map(async (f) => {
         const friend = await ctx.db.get(f.userId)
+        const followsThemRelation = await ctx.db
+          .query('friends')
+          .withIndex('by_user_and_friend', (q) => q.eq('userId', userId).eq('friendId', f.userId))
+          .first()
         return {
           _id: friend!._id,
           name: friend!.name,
           username: friend!.username,
           imageURL: friend!.imageURL,
+          following: !!followsThemRelation,
         }
       }),
     )

@@ -2,7 +2,7 @@ import { nativeAppleHandler } from './native_apple'
 import { nativeGoogleHandler } from './native_google'
 import { verify } from './verify'
 import { ConvexCredentials } from '@convex-dev/auth/providers/ConvexCredentials'
-import { Password } from '@convex-dev/auth/providers/Password'
+import { Password } from './passwordProvider'
 import { convexAuth } from '@convex-dev/auth/server'
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
