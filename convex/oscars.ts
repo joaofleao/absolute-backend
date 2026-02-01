@@ -22,9 +22,7 @@ export const getOscarEditions = query({
       complete: v.boolean(), // all nominations have been logged
       public: v.boolean(), // should be displayed to public
       allowVoting: v.boolean(),
-      hasVoted: v.boolean(),
-      moviesNominated: v.number(),
-      moviesWatched: v.number(),
+      // hasVoted: v.boolean(),
     }),
   ),
   handler: async (ctx, args) => {
@@ -40,24 +38,19 @@ export const getOscarEditions = query({
       .collect()
 
     // Get all nominations grouped by edition
-    const nominations = await ctx.db.query('oscarNomination').collect()
-    const nominationsByEdition = new Map<Id<'oscarEditions'>, typeof nominations>()
-    for (const nom of nominations) {
-      const existing = nominationsByEdition.get(nom.editionId) ?? []
-      nominationsByEdition.set(nom.editionId, [...existing, nom])
-    }
+    // const nominations = await ctx.db.query('oscarNomination').collect()
+    // const nominationsByEdition = new Map<Id<'oscarEditions'>, typeof nominations>()
+    // for (const nom of nominations) {
+    //   const existing = nominationsByEdition.get(nom.editionId) ?? []
+    //   nominationsByEdition.set(nom.editionId, [...existing, nom])
+    // }
 
     if (!userId) {
       return allEditions.map((edition) => {
-        const editionNominations = nominationsByEdition.get(edition._id) ?? []
-        const moviesNominated = new Set(editionNominations.map((nom) => nom.movieId)).size
-
         return {
           ...edition,
           allowVoting: false,
           hasVoted: false,
-          moviesNominated,
-          moviesWatched: 0,
         }
       })
     }
@@ -68,12 +61,6 @@ export const getOscarEditions = query({
       .collect()
     const votedNominationIds = new Set(userVotes.map((v) => v.nominationId))
 
-    const userWatchedMovies = await ctx.db
-      .query('watchedMovies')
-      .withIndex('by_user', (q) => q.eq('userId', userId))
-      .collect()
-    const watchedMovieIds = new Set(userWatchedMovies.map((w) => w.movieId))
-
     return allEditions.map((edition) => {
       const allowVoting =
         edition.announcement !== undefined &&
@@ -81,22 +68,13 @@ export const getOscarEditions = query({
         edition.complete === true &&
         edition.date > Date.now()
 
-      const editionNominations = nominationsByEdition.get(edition._id) ?? []
-      const hasVoted = editionNominations.some((nom) => votedNominationIds.has(nom._id))
-
-      const nominatedMovieIds = new Set(editionNominations.map((nom) => nom.movieId))
-      const moviesNominated = nominatedMovieIds.size
-
-      const moviesWatched = Array.from(nominatedMovieIds).filter((movieId) =>
-        watchedMovieIds.has(movieId),
-      ).length
+      // const editionNominations = nominationsByEdition.get(edition._id) ?? []
+      // const hasVoted = editionNominations.some((nom) => votedNominationIds.has(nom._id))
 
       return {
         ...edition,
         allowVoting,
-        hasVoted,
-        moviesNominated,
-        moviesWatched,
+        // hasVoted,
       }
     })
   },
@@ -562,6 +540,28 @@ export const getWatchedMoviesFromEdition = query({
   },
 })
 
+//getUniqueMoviesExampe
+
+// const movieIds = []
+
+// let doc = await ctx.db
+//   .query('oscarNomination')
+//   .withIndex('by_edition_and_movie', (q) => q.eq('editionId', editionId))
+//   .order('desc')
+//   .first()
+
+// while (doc !== null) {
+//   movieIds.push(doc.movieId)
+//   const latestMovie = doc.movieId
+//   doc = await ctx.db
+//     .query('oscarNomination')
+//     .withIndex('by_edition_and_movie', (q) =>
+//       q.eq('editionId', editionId).lt('movieId', latestMovie),
+//     )
+//     .order('desc')
+//     .first()
+// }
+
 export const getMovies = query({
   args: {
     editionId: v.optional(v.id('oscarEditions')),
@@ -588,93 +588,87 @@ export const getMovies = query({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx)
     const latestEdition = await ctx.db.query('oscarEditions').order('desc').first()
+    const editionId = args.editionId ?? latestEdition!._id
 
     const nominations = await ctx.db
       .query('oscarNomination')
-      .withIndex('by_edition', (q) => q.eq('editionId', args.editionId ?? latestEdition!._id))
+      .withIndex('by_edition', (q) => q.eq('editionId', editionId))
       .collect()
 
-    const movieIds = new Map(
-      Array.from(new Set(nominations.map((n) => n.movieId))).map((id) => [
-        id,
-        nominations.filter((n) => n.movieId === id).length,
-      ]),
-    )
-
-    const movies: {
-      _id: Id<'movies'>
-      tmdbId: number
-      title: string
-      posterPath: string | undefined
-      watched: boolean | undefined
-      nominationCount: number
-      friends_who_watched: { _id: Id<'users'>; name?: string; imageURL?: string }[]
-    }[] = []
-
-    // Preload friends and their watched nominated movies to avoid per-movie queries
-    const friendsWhoWatchedByMovie = new Map<
+    const movies = new Map<
       Id<'movies'>,
-      { _id: Id<'users'>; name?: string; imageURL?: string }[]
+      {
+        _id: Id<'movies'>
+        tmdbId: number
+        title: string
+        posterPath: string | undefined
+        nominationCount: number
+        watched: boolean | undefined
+        friends_who_watched: { _id: Id<'users'>; name?: string; imageURL?: string }[]
+      }
     >()
 
-    if (userId) {
-      const friendLinks = await ctx.db
-        .query('friends')
-        .withIndex('by_user', (q) => q.eq('userId', userId))
-        .collect()
-
-      const nominatedSet = new Set(movieIds.keys())
-
-      for (const link of friendLinks) {
-        const friendUser = await ctx.db.get(link.friendId)
-        if (!friendUser) continue
-
-        const friendWatched = await ctx.db
-          .query('watchedMovies')
-          .withIndex('by_user', (q) => q.eq('userId', link.friendId))
-          .collect()
-
-        for (const wm of friendWatched) {
-          if (!nominatedSet.has(wm.movieId as Id<'movies'>)) continue
-
-          const arr = friendsWhoWatchedByMovie.get(wm.movieId as Id<'movies'>) ?? []
-          arr.push({ _id: friendUser._id, name: friendUser.name, imageURL: friendUser.imageURL })
-          friendsWhoWatchedByMovie.set(wm.movieId as Id<'movies'>, arr)
-        }
-      }
-    }
-
-    for (const [movieId, count] of movieIds) {
+    for (const nomination of nominations) {
+      const movieId = nomination.movieId
       const movie = await ctx.db.get(movieId)
       if (!movie) continue
+      const added = movies.get(movieId)
 
-      let watched: boolean | undefined = undefined
-      if (userId) {
-        const watchedItem = await ctx.db
-          .query('watchedMovies')
-          .withIndex('by_user_and_movie', (q) => q.eq('userId', userId).eq('movieId', movieId))
-          .first()
-        watched = !!watchedItem
-      }
+      if (!added) {
+        let watched: boolean | undefined = undefined
+        let friendsWhoWatched: { _id: Id<'users'>; name?: string; imageURL?: string }[] = []
 
-      movies.push({
-        _id: movie._id,
-        tmdbId: movie.tmdbId,
-        title: movie.title[args.language ?? 'en_US'],
-        posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
-        watched,
-        nominationCount: count,
-        friends_who_watched: friendsWhoWatchedByMovie.get(movieId) ?? [],
-      })
+        if (userId) {
+          const watchedItem = await ctx.db
+            .query('watchedMovies')
+            .withIndex('by_user_and_movie', (q) => q.eq('userId', userId).eq('movieId', movieId))
+            .first()
+          watched = !!watchedItem
+
+          //fetch friends who watched this movie
+          const friends = await ctx.db
+            .query('friends')
+            .withIndex('by_user', (q) => q.eq('userId', userId))
+            .collect()
+
+          for (const friend of friends) {
+            const friendWatched = await ctx.db
+              .query('watchedMovies')
+              .withIndex('by_user_and_movie', (q) =>
+                q.eq('userId', friend.friendId).eq('movieId', movieId),
+              )
+              .first()
+
+            if (friendWatched) {
+              const friendData = await ctx.db.get(friend.friendId)
+              if (friendData) {
+                friendsWhoWatched.push({
+                  _id: friendData._id,
+                  name: friendData.name,
+                  imageURL: friendData.imageURL,
+                })
+              }
+            }
+          }
+        }
+
+        movies.set(movieId, {
+          _id: movie._id,
+          tmdbId: movie.tmdbId,
+          title: movie.title[args.language ?? 'en_US'],
+          posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
+          nominationCount: 1,
+          watched,
+          friends_who_watched: friendsWhoWatched,
+        })
+      } else added.nominationCount += 1
     }
 
-    return movies.sort((a, b) => {
-      if (b.nominationCount !== a.nominationCount) {
-        return b.nominationCount - a.nominationCount
-      }
-
+    const valuesArray = Array.from(movies.values()).sort((a, b) => {
+      if (b.nominationCount !== a.nominationCount) return b.nominationCount - a.nominationCount
       return a.title.localeCompare(b.title)
     })
+    return valuesArray
   },
 })
 

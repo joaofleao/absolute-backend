@@ -166,6 +166,7 @@ const applicationTables = {
   })
     .index('by_edition', ['editionId'])
     .index('by_edition_and_category', ['editionId', 'categoryId'])
+    .index('by_edition_and_movie', ['editionId', 'movieId'])
     .index('by_movie', ['movieId']),
 
   friends: defineTable({
