@@ -142,7 +142,6 @@ export const fetchMovie = internalAction({
       title: {
         original: dataEN.original_title,
         en_US: dataEN.title,
-
         pt_BR: dataPT.title ?? dataEN.title,
       },
       posterPath: dataEN.poster_path

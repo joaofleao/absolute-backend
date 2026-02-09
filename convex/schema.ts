@@ -35,7 +35,7 @@ const applicationTables = {
   })
     .index('email', ['email'])
     .index('by_username', ['username'])
-    .searchIndex('search_name', { searchField: 'name' }),
+    .searchIndex('search_name', { searchField: 'username' }),
 
   movies: defineTable({
     title: v.object({

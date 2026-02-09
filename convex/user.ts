@@ -40,7 +40,6 @@ export const checkUsernameAvailability = query({
   returns: v.union(v.boolean(), v.null()),
   handler: async (ctx, args) => {
     if (args.username === undefined) return null
-    if (args.username.trim().length < 3) return false
 
     const existingUser = await ctx.db
       .query('users')
@@ -75,14 +74,14 @@ export const updateUser = mutation({
         .query('users')
         .filter((q) => q.eq(q.field('_id'), userId))
         .first()
-      if (user?.image) await ctx.storage.delete(user.image)
+      if (user?.image) await ctx.storage.delete(user.image).catch(() => {})
     }
     if (args.image !== null && args.image !== undefined) {
       const user = await ctx.db
         .query('users')
         .filter((q) => q.eq(q.field('_id'), userId))
         .first()
-      if (user?.image) await ctx.storage.delete(user.image)
+      if (user?.image) await ctx.storage.delete(user.image).catch(() => {})
       const imageUrl = await ctx.storage.getUrl(args.image)
       if (!imageUrl) throw new ConvexError('Failed to get image URL')
       patch.image = args.image
@@ -252,61 +251,68 @@ export const reportError = action({
   },
 })
 
-export const searchByName = query({
-  args: { name: v.string() },
+export const searchUsers = query({
+  args: {
+    name: v.string(),
+  },
   returns: v.array(
     v.object({
       _id: v.id('users'),
       name: v.optional(v.string()),
-      imageURL: v.optional(v.string()),
       username: v.optional(v.string()),
+      imageURL: v.optional(v.string()),
       following: v.boolean(),
       follows: v.boolean(),
     }),
   ),
   handler: async (ctx, args) => {
+    if (args.name === '' || args.name.length < 3) return []
     const userId = await getAuthUserId(ctx)
-    // if (!userId) throw new ConvexError('Not authenticated')
 
-    const users = await ctx.db
+    const matchingUsers = await ctx.db
       .query('users')
-      .withSearchIndex('search_name', (q) => q.search('name', args.name))
-      .filter((q) => q.neq(q.field('_id'), userId))
+      .withSearchIndex('search_name', (q) => q.search('username', args.name))
       .take(5)
 
-    const enrichedUsers = userId
-      ? await Promise.all(
-          users.map(async (user) => {
-            const following = await ctx.db
-              .query('friends')
-              .withIndex('by_user', (q) => q.eq('userId', userId))
-              .unique()
+    if (!userId)
+      return matchingUsers.map((user) => ({
+        _id: user._id,
+        name: user.name,
+        username: user.username,
+        imageURL: user.imageURL,
+        following: false,
+        follows: false,
+      }))
 
-            const follows = await ctx.db
-              .query('friends')
-              .withIndex('by_friend', (q) => q.eq('friendId', userId))
-              .unique()
+    return await Promise.all(
+      matchingUsers.map(async (user) => {
+        let following = false
+        let follows = false
 
-            return {
-              _id: user._id,
-              name: user.name,
-              imageURL: user.imageURL,
-              username: user.username,
-              following: !!following,
-              follows: !!follows,
-            }
-          }),
-        )
-      : users.map((user) => ({
+        if (userId) {
+          const followingRelation = await ctx.db
+            .query('friends')
+            .withIndex('by_user_and_friend', (q) => q.eq('userId', userId).eq('friendId', user._id))
+            .first()
+          following = !!followingRelation
+
+          const followsRelation = await ctx.db
+            .query('friends')
+            .withIndex('by_user_and_friend', (q) => q.eq('userId', user._id).eq('friendId', userId))
+            .first()
+          follows = !!followsRelation
+        }
+
+        return {
           _id: user._id,
           name: user.name,
           imageURL: user.imageURL,
           username: user.username,
-          following: false,
-          follows: false,
-        }))
-
-    return enrichedUsers
+          following,
+          follows,
+        }
+      }),
+    )
   },
 })
 

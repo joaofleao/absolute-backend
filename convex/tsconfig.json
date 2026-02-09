@@ -20,6 +20,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["./**/*"],
+  "include": ["./**/*", "oscar_movies.ts"],
   "exclude": ["./_generated"]
 }

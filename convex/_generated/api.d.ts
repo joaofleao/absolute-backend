@@ -17,6 +17,8 @@ import type * as movies from "../movies.js";
 import type * as native_apple from "../native_apple.js";
 import type * as native_google from "../native_google.js";
 import type * as node from "../node.js";
+import type * as oscar from "../oscar.js";
+import type * as oscar_movies from "../oscar_movies.js";
 import type * as oscars from "../oscars.js";
 import type * as passwordProvider from "../passwordProvider.js";
 import type * as populate from "../populate.js";
@@ -40,6 +42,8 @@ declare const fullApi: ApiFromModules<{
   native_apple: typeof native_apple;
   native_google: typeof native_google;
   node: typeof node;
+  oscar: typeof oscar;
+  oscar_movies: typeof oscar_movies;
   oscars: typeof oscars;
   passwordProvider: typeof passwordProvider;
   populate: typeof populate;
