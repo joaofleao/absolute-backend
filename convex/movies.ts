@@ -239,6 +239,20 @@ export const getMovie = query({
           }),
         ),
       ),
+      providers: v.optional(
+        v.record(
+          v.string(),
+          v.array(
+            v.object({
+              type: v.union(v.literal('buy'), v.literal('flatrate'), v.literal('rent')),
+              provider_id: v.number(),
+              provider_name: v.string(),
+              logo_path: v.string(),
+            }),
+          ),
+        ),
+      ),
+      last_update: v.optional(v.number()),
     }),
     v.null(),
   ),
@@ -420,14 +434,24 @@ export const getUserWatchlist = query({
         const movie = await ctx.db.get(item.movieId)
         if (!movie) return
         return {
-          ...movie,
-          addedAt: item.addedAt,
+          _id: movie._id,
+          _creationTime: movie._creationTime,
           title: movie.title[args.language ?? 'en_US'],
           posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
-          plot: movie.plot?.[args.language ?? 'en_US'],
+          backdropPath: movie.backdropPath,
+          imdbId: movie.imdbId,
           originalLanguage: movie.originalLanguage
             ? languages[movie.originalLanguage][args.language ?? 'en_US']
             : undefined,
+          plot: movie.plot?.[args.language ?? 'en_US'],
+          releaseDate: movie.releaseDate,
+          runtime: movie.runtime,
+          status: movie.status,
+          tagline: movie.tagline,
+          voteAverage: movie.voteAverage,
+          originCountry: movie.originCountry,
+          tmdbId: movie.tmdbId,
+          addedAt: item.addedAt,
         }
       }),
     )
@@ -476,15 +500,25 @@ export const getUserWatchedMovies = query({
         const movie = await ctx.db.get(item.movieId)
         if (!movie) return null
         return {
-          ...movie,
-          watchedAt: item.watchedAt,
-          watchId: item._id,
+          _id: movie._id,
+          _creationTime: movie._creationTime,
           title: movie.title[args.language ?? 'en_US'],
           posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
-          plot: movie.plot?.[args.language ?? 'en_US'],
+          backdropPath: movie.backdropPath,
+          imdbId: movie.imdbId,
           originalLanguage: movie.originalLanguage
             ? languages[movie.originalLanguage][args.language ?? 'en_US']
             : undefined,
+          plot: movie.plot?.[args.language ?? 'en_US'],
+          releaseDate: movie.releaseDate,
+          runtime: movie.runtime,
+          status: movie.status,
+          tagline: movie.tagline,
+          originCountry: movie.originCountry,
+          voteAverage: movie.voteAverage,
+          tmdbId: movie.tmdbId,
+          watchedAt: item.watchedAt,
+          watchId: item._id,
         }
       }),
     )

@@ -2,6 +2,7 @@ import { ConvexError, v } from 'convex/values'
 
 import { action, mutation, query } from './_generated/server'
 import { getAuthUserId } from '@convex-dev/auth/server'
+import { modifyAccountCredentials, retrieveAccount } from '@convex-dev/auth/server'
 
 export const generateUploadUrl = mutation({
   args: {},
@@ -18,10 +19,17 @@ export const getLatestVersion = query({
   returns: v.object({
     _id: v.id('versions'),
     _creationTime: v.number(),
-    url: v.string(),
+    url: v.union(
+      v.object({
+        android: v.string(),
+        ios: v.string(),
+      }),
+      v.string(),
+    ),
     version: v.string(),
     changelog: v.string(),
-    app: v.optional(v.union(v.literal('absolute-cinema'), v.literal('oscar-tracker'))),
+    app: v.union(v.literal('absolute-cinema'), v.literal('oscar-tracker')),
+    env: v.union(v.literal('test'), v.literal('prod')),
   }),
   handler: async (ctx, args) => {
     const latest = await ctx.db
@@ -33,6 +41,7 @@ export const getLatestVersion = query({
     return { ...latest!, changelog: latest.changelog[args.language ?? 'en_US'] }
   },
 })
+
 export const checkUsernameAvailability = query({
   args: {
     username: v.optional(v.string()),
@@ -118,6 +127,7 @@ export const getCurrentUser = query({
       phoneVerificationTime: v.optional(v.number()),
       isAnonymous: v.optional(v.boolean()),
       username: v.optional(v.string()),
+      admin: v.optional(v.boolean()),
 
       language: v.optional(v.union(v.literal('pt_BR'), v.literal('en_US'))),
 
@@ -248,6 +258,45 @@ export const reportError = action({
     })
 
     if (!res.ok) throw new ConvexError('Resend error: ' + JSON.stringify(await res.json()))
+  },
+})
+
+export const adminResetPassword = action({
+  args: {
+    email: v.string(),
+  },
+  returns: v.object({
+    email: v.string(),
+    temporaryPassword: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const normalizedEmail = args.email.trim().toLowerCase()
+
+    // 10000..99999 guarantees exactly 5 digits.
+    const randomFiveDigits = Math.floor(Math.random() * 90000) + 10000
+    const temporaryPassword = `Oscar${randomFiveDigits}`
+
+    try {
+      await retrieveAccount(ctx, {
+        provider: 'password',
+        account: { id: normalizedEmail },
+      })
+    } catch {
+      throw new ConvexError('account-not-found')
+    }
+
+    await modifyAccountCredentials(ctx, {
+      provider: 'password',
+      account: {
+        id: normalizedEmail,
+        secret: temporaryPassword,
+      },
+    })
+
+    return {
+      email: normalizedEmail,
+      temporaryPassword,
+    }
   },
 })
 

@@ -10,6 +10,7 @@
 
 import type * as actors from "../actors.js";
 import type * as auth from "../auth.js";
+import type * as ballots from "../ballots.js";
 import type * as constants from "../constants.js";
 import type * as errorCatalog from "../errorCatalog.js";
 import type * as http from "../http.js";
@@ -22,6 +23,7 @@ import type * as oscar_movies from "../oscar_movies.js";
 import type * as oscars from "../oscars.js";
 import type * as passwordProvider from "../passwordProvider.js";
 import type * as populate from "../populate.js";
+import type * as providers from "../providers.js";
 import type * as router from "../router.js";
 import type * as user from "../user.js";
 import type * as verify from "../verify.js";
@@ -35,6 +37,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   actors: typeof actors;
   auth: typeof auth;
+  ballots: typeof ballots;
   constants: typeof constants;
   errorCatalog: typeof errorCatalog;
   http: typeof http;
@@ -47,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   oscars: typeof oscars;
   passwordProvider: typeof passwordProvider;
   populate: typeof populate;
+  providers: typeof providers;
   router: typeof router;
   user: typeof user;
   verify: typeof verify;

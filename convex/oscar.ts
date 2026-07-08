@@ -1,7 +1,7 @@
-import { ConvexError, v } from 'convex/values'
+import { v } from 'convex/values'
 
 import { Id } from './_generated/dataModel'
-import { query } from './_generated/server'
+import { mutation, query } from './_generated/server'
 
 import { getAuthUserId } from '@convex-dev/auth/server'
 import { api } from './_generated/api'
@@ -21,8 +21,8 @@ export const getAllEditions = query({
     const allEditions = await ctx.db
       .query('oscarEditions')
       .withIndex(
-        'by_public_and_number',
-        args.public !== undefined ? (q) => q.eq('public', args.public ?? true) : undefined,
+        'by_complete_and_number',
+        args.public !== undefined ? (q) => q.eq('complete', args.public ?? true) : undefined,
       )
       .order('desc')
       .collect()
@@ -45,7 +45,8 @@ export const getEdition = query({
     year: v.number(),
     date: v.number(),
     announcement: v.optional(v.number()),
-    complete: v.optional(v.boolean()),
+    complete: v.boolean(),
+    finished: v.boolean(),
   }),
   handler: async (ctx, args) => {
     let edition
@@ -53,7 +54,7 @@ export const getEdition = query({
     if (!edition)
       edition = await ctx.db
         .query('oscarEditions')
-        .withIndex('by_public_and_number', (q) => q.eq('public', true))
+        .withIndex('by_complete_and_number', (q) => q.eq('complete', true))
         .order('desc')
         .first()
     if (!edition) throw new Error('Edition not found')
@@ -64,6 +65,7 @@ export const getEdition = query({
       year: edition.year,
       date: edition.date,
       announcement: edition.announcement,
+      finished: edition.finished,
       complete: edition.complete,
     }
   },
@@ -410,9 +412,17 @@ export const getNominations = query({
       })
     }
 
-    const data = Array.from(categoryMap.values()).sort(
-      (a, b) => a.category.order - b.category.order,
-    )
+    const data = Array.from(categoryMap.values())
+      .map((entry) => ({
+        ...entry,
+        nominations: [...entry.nominations].sort((a, b) => {
+          const aWinner = a.winner ? 1 : 0
+          const bWinner = b.winner ? 1 : 0
+          if (bWinner !== aWinner) return bWinner - aWinner
+          return a.title.localeCompare(b.title)
+        }),
+      }))
+      .sort((a, b) => a.category.order - b.category.order)
     return data
   },
 })
@@ -429,6 +439,7 @@ export const getMovies = query({
       title: v.string(),
       posterPath: v.optional(v.string()),
       nominationCount: v.number(),
+      runtime: v.optional(v.number()),
     }),
   ),
 
@@ -450,6 +461,7 @@ export const getMovies = query({
         title: string
         posterPath: string | undefined
         nominationCount: number
+        runtime: number | undefined
       }
     >()
 
@@ -466,6 +478,7 @@ export const getMovies = query({
           title: movie.title[args.language ?? 'en_US'],
           posterPath: movie.posterPath ? movie.posterPath[args.language ?? 'en_US'] : undefined,
           nominationCount: 1,
+          runtime: movie.runtime,
         })
       } else added.nominationCount += 1
     }
@@ -475,5 +488,58 @@ export const getMovies = query({
       return a.title.localeCompare(b.title)
     })
     return valuesArray
+  },
+})
+
+export const getAwards = query({
+  args: {
+    _id: v.optional(v.id('oscarEditions')),
+  },
+  returns: v.object({
+    _id: v.id('oscarEditions'),
+    number: v.number(),
+    year: v.number(),
+    date: v.number(),
+    announcement: v.optional(v.number()),
+    complete: v.boolean(),
+    finished: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    let edition
+    if (args._id) edition = await ctx.db.get('oscarEditions', args._id)
+    if (!edition)
+      edition = await ctx.db
+        .query('oscarEditions')
+        .withIndex('by_complete_and_number', (q) => q.eq('complete', true))
+        .order('desc')
+        .first()
+    if (!edition) throw new Error('Edition not found')
+
+    return {
+      _id: edition._id,
+      number: edition.number,
+      year: edition.year,
+      date: edition.date,
+      announcement: edition.announcement,
+      finished: edition.finished,
+      complete: edition.complete,
+    }
+  },
+})
+
+export const markAsWinner = mutation({
+  args: {
+    nominationId: v.id('oscarNomination'),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const nomination = await ctx.db.get('oscarNomination', args.nominationId)
+    if (!nomination) return false
+
+    await ctx.db.patch('oscarNomination', args.nominationId, {
+      winner: nomination.winner ? undefined : true,
+    })
+
+    return true
   },
 })

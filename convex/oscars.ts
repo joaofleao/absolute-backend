@@ -18,11 +18,9 @@ export const getOscarEditions = query({
       year: v.number(),
       date: v.number(),
       announcement: v.optional(v.number()),
-      finished: v.boolean(), // all winners have been logged
-      complete: v.boolean(), // all nominations have been logged
-      public: v.boolean(), // should be displayed to public
+      finished: v.boolean(),
+      complete: v.boolean(),
       allowVoting: v.boolean(),
-      // hasVoted: v.boolean(),
     }),
   ),
   handler: async (ctx, args) => {
@@ -31,8 +29,8 @@ export const getOscarEditions = query({
     const allEditions = await ctx.db
       .query('oscarEditions')
       .withIndex(
-        'by_public_and_number',
-        args.public !== undefined ? (q) => q.eq('public', args.public ?? true) : undefined,
+        'by_complete_and_number',
+        args.public !== undefined ? (q) => q.eq('complete', args.public ?? true) : undefined,
       )
       .order('desc')
       .collect()
@@ -95,8 +93,8 @@ export const getAllEditions = query({
     const allEditions = await ctx.db
       .query('oscarEditions')
       .withIndex(
-        'by_public_and_number',
-        args.public !== undefined ? (q) => q.eq('public', args.public ?? true) : undefined,
+        'by_complete_and_number',
+        args.public !== undefined ? (q) => q.eq('complete', args.public ?? true) : undefined,
       )
       .order('desc')
       .collect()
@@ -126,7 +124,7 @@ export const getEdition = query({
     if (!edition)
       edition = await ctx.db
         .query('oscarEditions')
-        .withIndex('by_public_and_number', (q) => q.eq('public', true))
+        .withIndex('by_complete_and_number', (q) => q.eq('complete', true))
         .order('desc')
         .first()
     if (!edition) throw new ConvexError('Edition not found')
@@ -148,7 +146,6 @@ export const createOscarEdition = mutation({
     date: v.number(),
     announcement: v.optional(v.number()),
     complete: v.boolean(),
-    public: v.boolean(),
     finished: v.boolean(),
   },
   returns: v.id('oscarEditions'),
@@ -168,7 +165,6 @@ export const updateOscarEdition = mutation({
     date: v.number(),
     announcement: v.optional(v.number()),
     complete: v.boolean(),
-    public: v.boolean(),
     finished: v.boolean(),
   },
   returns: v.null(),
@@ -941,6 +937,7 @@ export const getMovieDetail = query({
   args: {
     tmdbId: v.number(),
     language: v.optional(v.union(v.literal('pt_BR'), v.literal('en_US'))),
+    country: v.optional(v.string()),
   },
   returns: v.object({
     _id: v.id('movies'),
@@ -961,6 +958,15 @@ export const getMovieDetail = query({
     tagline: v.optional(v.string()),
     voteAverage: v.optional(v.number()),
     tmdbId: v.number(),
+    providers: v.array(
+      v.object({
+        type: v.union(v.literal('buy'), v.literal('flatrate'), v.literal('rent')),
+        provider_id: v.number(),
+        provider_name: v.string(),
+        logo_path: v.string(),
+      }),
+    ),
+    last_update: v.optional(v.number()),
     originCountry: v.optional(
       v.array(
         v.object({
@@ -990,80 +996,6 @@ export const getMovieDetail = query({
       }),
     ),
   }),
-  // cast: v.array(
-  //   v.object({
-  //     id: v.number(),
-  //     name: v.string(),
-  //     character: v.optional(v.string()),
-  //     profile_path: v.optional(v.string()),
-  //     order: v.number(),
-  //   }),
-  // ),
-
-  // providers: v.object({
-  //   BR: v.optional(
-  //     v.object({
-  //       flatrate: v.optional(
-  //         v.array(
-  //           v.object({
-  //             provider_id: v.number(),
-  //             provider_name: v.string(),
-  //             logo_path: v.string(),
-  //           }),
-  //         ),
-  //       ),
-  //       rent: v.optional(
-  //         v.array(
-  //           v.object({
-  //             provider_id: v.number(),
-  //             provider_name: v.string(),
-  //             logo_path: v.string(),
-  //           }),
-  //         ),
-  //       ),
-  //       buy: v.optional(
-  //         v.array(
-  //           v.object({
-  //             provider_id: v.number(),
-  //             provider_name: v.string(),
-  //             logo_path: v.string(),
-  //           }),
-  //         ),
-  //       ),
-  //     }),
-  //   ),
-  //   US: v.optional(
-  //     v.object({
-  //       flatrate: v.optional(
-  //         v.array(
-  //           v.object({
-  //             provider_id: v.number(),
-  //             provider_name: v.string(),
-  //             logo_path: v.string(),
-  //           }),
-  //         ),
-  //       ),
-  //       rent: v.optional(
-  //         v.array(
-  //           v.object({
-  //             provider_id: v.number(),
-  //             provider_name: v.string(),
-  //             logo_path: v.string(),
-  //           }),
-  //         ),
-  //       ),
-  //       buy: v.optional(
-  //         v.array(
-  //           v.object({
-  //             provider_id: v.number(),
-  //             provider_name: v.string(),
-  //             logo_path: v.string(),
-  //           }),
-  //         ),
-  //       ),
-  //     }),
-  //   ),
-  // }),
 
   handler: async (ctx, args): Promise<any> => {
     const movie = await ctx.runQuery(api.movies.getMovie, {
@@ -1086,6 +1018,7 @@ export const getMovieDetail = query({
     })
     return {
       ...movie,
+      providers: movie.providers?.[args.country ?? 'US'] ?? [],
       latestWatch: latestWatch ? latestWatch : undefined,
       nominations: nominations.map((nom) => ({
         ...nom,
@@ -1094,114 +1027,6 @@ export const getMovieDetail = query({
 
       friends,
     }
-
-    // 2. Fetch cast from TMDB
-    // let cast: {
-    //   id: number
-    //   name: string
-    //   character?: string
-    //   profile_path?: string
-    //   order: number
-    // }[] = []
-
-    // try {
-    //   const castUrl = `https://api.themoviedb.org/3/movie/${movie.tmdbId}/credits?language=en-US`
-    //   const headers = {
-    //     Authorization: `Bearer ${process.env.TMDB_BEARER_TOKEN}`,
-    //     accept: 'application/json',
-    //   }
-
-    //   const castResponse = await fetch(castUrl, { headers })
-    //   if (castResponse.ok) {
-    //     const castData: { cast?: any[] } = await castResponse.json()
-    //     cast = (castData.cast || []).slice(0, 20).map((actor, index) => ({
-    //       id: actor.id,
-    //       name: actor.name,
-    //       character: actor.character || undefined,
-    //       profile_path: actor.profile_path || undefined,
-    //       order: index,
-    //     }))
-    //   }
-    // } catch (error) {
-    //   console.error('Error fetching cast from TMDB:', error)
-    //   // Continue without cast if fetch fails
-    // }
-
-    // // 5. Fetch watch providers from TMDB
-    // let providers: { BR?: any; US?: any } = {}
-    // try {
-    //   const providersUrl = `https://api.themoviedb.org/3/movie/${movie.tmdbId}/watch/providers?language=en-US`
-    //   const headers = {
-    //     Authorization: `Bearer ${process.env.TMDB_BEARER_TOKEN}`,
-    //     accept: 'application/json',
-    //   }
-
-    //   const providersResponse = await fetch(providersUrl, { headers })
-    //   if (providersResponse.ok) {
-    //     const providersData: { results?: Record<string, any> } = await providersResponse.json()
-
-    //     if (providersData.results) {
-    //       // Extract Brazil (BR) providers
-    //       if (providersData.results.BR) {
-    //         const brData = providersData.results.BR
-    //         providers.BR = {
-    //           flatrate: brData.flatrate
-    //             ? brData.flatrate.map((p: any) => ({
-    //                 provider_id: p.provider_id,
-    //                 provider_name: p.provider_name,
-    //                 logo_path: p.logo_path,
-    //               }))
-    //             : undefined,
-    //           rent: brData.rent
-    //             ? brData.rent.map((p: any) => ({
-    //                 provider_id: p.provider_id,
-    //                 provider_name: p.provider_name,
-    //                 logo_path: p.logo_path,
-    //               }))
-    //             : undefined,
-    //           buy: brData.buy
-    //             ? brData.buy.map((p: any) => ({
-    //                 provider_id: p.provider_id,
-    //                 provider_name: p.provider_name,
-    //                 logo_path: p.logo_path,
-    //               }))
-    //             : undefined,
-    //         }
-    //       }
-
-    //       // Extract US providers
-    //       if (providersData.results.US) {
-    //         const usData = providersData.results.US
-    //         providers.US = {
-    //           flatrate: usData.flatrate
-    //             ? usData.flatrate.map((p: any) => ({
-    //                 provider_id: p.provider_id,
-    //                 provider_name: p.provider_name,
-    //                 logo_path: p.logo_path,
-    //               }))
-    //             : undefined,
-    //           rent: usData.rent
-    //             ? usData.rent.map((p: any) => ({
-    //                 provider_id: p.provider_id,
-    //                 provider_name: p.provider_name,
-    //                 logo_path: p.logo_path,
-    //               }))
-    //             : undefined,
-    //           buy: usData.buy
-    //             ? usData.buy.map((p: any) => ({
-    //                 provider_id: p.provider_id,
-    //                 provider_name: p.provider_name,
-    //                 logo_path: p.logo_path,
-    //               }))
-    //             : undefined,
-    //         }
-    //       }
-    //     }
-    //   }
-    // } catch (error) {
-    //   console.error('Error fetching providers from TMDB:', error)
-    //   // Continue without providers if fetch fails
-    // }
   },
 })
 export const getBallotResults = query({
